@@ -23,10 +23,13 @@ final class PrayerTimes {
     private static final String TAG = "TvHome.Solat";
     private static final long RETRY_MS = 60L * 60 * 1000;
     private static final String[] KEYS = {"fajr", "dhuhr", "asr", "maghrib", "isha"};
-    static final String[] NAMES = {"Subuh", "Zohor", "Asar", "Maghrib", "Isyak"};
-    private static final String[] MONTHS = {"jan", "feb", "mac", "apr", "mei", "jun", "jul", "ogo", "sep", "okt", "nov", "dis"};
-    private static final String[] HIJRI_MONTHS = {"Muharram", "Safar", "Rabiulawal", "Rabiulakhir", "Jamadilawal",
-            "Jamadilakhir", "Rejab", "Syaaban", "Ramadan", "Syawal", "Zulkaedah", "Zulhijjah"};
+    
+    // --- TRANSLASI INDONESIA ---
+    static final String[] NAMES = {"Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya"};
+    private static final String[] MONTHS = {"jan", "feb", "mar", "apr", "mei", "jun", "jul", "agu", "sep", "okt", "nov", "des"};
+    private static final String[] HIJRI_MONTHS = {"Muharram", "Safar", "Rabiul Awal", "Rabiul Akhir", "Jumadil Awal",
+            "Jumadil Akhir", "Rajab", "Sya'ban", "Ramadhan", "Syawal", "Dzulqa'dah", "Dzulhijjah"};
+    // ---------------------------
 
     static final class Day {
         final int[] minutes;
@@ -107,10 +110,10 @@ final class PrayerTimes {
                 os.write(days.toString().getBytes(StandardCharsets.UTF_8));
             }
             if (!tmp.renameTo(out)) throw new IllegalStateException("rename failed");
-            Log.i(TAG, "saved " + days.length() + " days for " + zone);
+            Log.i(TAG, "tersimpan " + days.length() + " hari untuk " + zone);
             return true;
         } catch (Exception e) {
-            Log.w(TAG, "fetch failed for " + zone + ": " + e.getMessage());
+            Log.w(TAG, "gagal mengambil data untuk " + zone + ": " + e.getMessage());
             return false;
         }
     }
@@ -168,11 +171,13 @@ final class PrayerTimes {
         return -1;
     }
 
+    // --- HITUNG MUNDUR BAHASA INDONESIA ---
     static String countdown(int minutesLeft) {
         int h = minutesLeft / 60, m = minutesLeft % 60;
-        if (h == 0) return "dalam " + Math.max(1, m) + " min";
-        return m == 0 ? "dalam " + h + " j" : "dalam " + h + " j " + m + " min";
+        if (h == 0) return "dalam " + Math.max(1, m) + " menit";
+        return m == 0 ? "dalam " + h + " jam" : "dalam " + h + " jam " + m + " menit";
     }
+    // -------------------------------------
 
     static String format(int minutes, boolean is24) {
         int h = minutes / 60, m = minutes % 60;
