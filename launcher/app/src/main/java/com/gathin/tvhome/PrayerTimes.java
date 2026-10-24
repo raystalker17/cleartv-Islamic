@@ -19,24 +19,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.Locale;
 
-/**
- * Malaysian prayer times from JAKIM's e-Solat, for the zone a theme names ("prayer_zone": "TRG04").
- * The whole year is fetched once and kept on disk, so the row under the clock needs the network only
- * when a new year starts. Every failure leaves the row as it was; a failed fetch is tried again an
- * hour later.
- */
 final class PrayerTimes {
     private static final String TAG = "TvHome.Solat";
     private static final long RETRY_MS = 60L * 60 * 1000;
-    /** JAKIM's keys, in the order the row shows them. */
     private static final String[] KEYS = {"fajr", "dhuhr", "asr", "maghrib", "isha"};
     static final String[] NAMES = {"Subuh", "Zohor", "Asar", "Maghrib", "Isyak"};
-    /** Month abbreviations as e-Solat writes them in its dates ("21-Okt-2026"). */
     private static final String[] MONTHS = {"jan", "feb", "mac", "apr", "mei", "jun", "jul", "ogo", "sep", "okt", "nov", "dis"};
     private static final String[] HIJRI_MONTHS = {"Muharram", "Safar", "Rabiulawal", "Rabiulakhir", "Jamadilawal",
             "Jamadilakhir", "Rejab", "Syaaban", "Ramadan", "Syawal", "Zulkaedah", "Zulhijjah"};
 
-    /** One day's times, in minutes after midnight, and its Hijri date ("10 Jamadilawal 1448"). */
     static final class Day {
         final int[] minutes;
         final String hijri;
@@ -55,7 +46,6 @@ final class PrayerTimes {
         return base != null ? new File(base, "solat-" + zone + ".json") : null;
     }
 
-    /** The day of the cached year whose date is {@code key} ("21-10-2026"), or null. */
     static Day day(Context ctx, String zone, String key) {
         JSONArray days = read(file(ctx, zone));
         for (int i = 0; days != null && i < days.length(); i++) {
@@ -71,22 +61,47 @@ final class PrayerTimes {
         return null;
     }
 
-    /** True when the cache has no entry for today and no fetch failed in the last hour. */
     static boolean due(Context ctx, String zone, String todayKey) {
         if (day(ctx, zone, todayKey) != null) return false;
         return System.currentTimeMillis() - prefs(ctx).getLong("tried_" + zone, 0) >= RETRY_MS;
     }
 
-    /** Downloads the year's times for the zone. Blocking: call from a background thread. */
     static boolean refresh(Context ctx, String zone) {
         prefs(ctx).edit().putLong("tried_" + zone, System.currentTimeMillis()).apply();
         File out = file(ctx, zone);
         if (out == null) return false;
         try {
-            byte[] body = get("https://www.e-solat.gov.my/index.php?r=esolatApi/TakwimSolat&period=year&zone="
-                    + java.net.URLEncoder.encode(zone, "UTF-8"), 512 * 1024);
-            JSONArray days = new JSONObject(new String(body, StandardCharsets.UTF_8)).optJSONArray("prayerTime");
-            if (days == null || days.length() == 0) throw new IllegalStateException("no prayerTime");
+            int year = Calendar.getInstance().get(Calendar.YEAR);
+            JSONArray days = new JSONArray();
+            // Fetch 12 months from Aladhan API (Tangerang coordinates, Kemenag method)
+            for (int month = 1; month <= 12; month++) {
+                String url = "http://api.aladhan.com/v1/calendar/" + year + "/" + month + "?latitude=-6.1783&longitude=106.6319&method=20";
+                byte[] body = get(url, 1024 * 1024);
+                JSONArray data = new JSONObject(new String(body, StandardCharsets.UTF_8)).optJSONArray("data");
+                if (data == null) continue;
+                for (int i = 0; i < data.length(); i++) {
+                    JSONObject d = data.getJSONObject(i);
+                    JSONObject timings = d.getJSONObject("timings");
+                    JSONObject obj = new JSONObject();
+                    
+                    obj.put("fajr", timings.optString("Fajr").split(" ")[0]);
+                    obj.put("dhuhr", timings.optString("Dhuhr").split(" ")[0]);
+                    obj.put("asr", timings.optString("Asr").split(" ")[0]);
+                    obj.put("maghrib", timings.optString("Maghrib").split(" ")[0]);
+                    obj.put("isha", timings.optString("Isha").split(" ")[0]);
+                    
+                    JSONObject date = d.getJSONObject("date");
+                    obj.put("date", date.getJSONObject("gregorian").getString("date"));
+                    
+                    String hDate = date.getJSONObject("hijri").getString("date");
+                    String[] hp = hDate.split("-");
+                    obj.put("hijri", hp[2] + "-" + hp[1] + "-" + hp[0]);
+                    
+                    days.put(obj);
+                }
+            }
+            if (days.length() == 0) throw new IllegalStateException("no data");
+
             File tmp = new File(out.getPath() + ".new");
             try (OutputStream os = new FileOutputStream(tmp)) {
                 os.write(days.toString().getBytes(StandardCharsets.UTF_8));
@@ -100,20 +115,21 @@ final class PrayerTimes {
         }
     }
 
-    /** "21-10-2026" for a calendar day, the key {@link #dateKey} gives e-Solat's dates. */
     static String key(Calendar c) {
         return String.format(Locale.ROOT, "%02d-%02d-%04d", c.get(Calendar.DAY_OF_MONTH),
                 c.get(Calendar.MONTH) + 1, c.get(Calendar.YEAR));
     }
 
-    /** "21-Okt-2026" (or "21-Oct-2026") to "21-10-2026"; "" when it is not a date. */
     static String dateKey(String date) {
         String[] p = date.trim().split("-");
-        if (p.length != 3 || p[1].length() < 3) return "";
+        if (p.length != 3) return "";
+        if (p[0].length() == 2 && p[2].length() == 4) {
+            return date; // Aladhan format DD-MM-YYYY
+        }
+        if (p[1].length() < 3) return "";
         String mon = p[1].substring(0, 3).toLowerCase(Locale.ROOT);
         int m = -1;
         for (int i = 0; i < MONTHS.length; i++) if (MONTHS[i].equals(mon)) m = i;
-        // English spellings where they differ from Malay.
         if (m < 0) m = "mar".equals(mon) ? 2 : "may".equals(mon) ? 4 : "aug".equals(mon) ? 7
                 : "oct".equals(mon) ? 9 : "dec".equals(mon) ? 11 : -1;
         if (m < 0) return "";
@@ -124,7 +140,6 @@ final class PrayerTimes {
         }
     }
 
-    /** "13:01:00" to 781; -1 when it is not a time. */
     static int minutes(String hms) {
         String[] p = hms.trim().split(":");
         if (p.length < 2) return -1;
@@ -136,7 +151,6 @@ final class PrayerTimes {
         }
     }
 
-    /** "1448-05-10" to "10 Jamadilawal 1448"; "" when it is not a date. */
     static String hijri(String ymd) {
         String[] p = ymd.trim().split("-");
         if (p.length != 3) return "";
@@ -149,20 +163,17 @@ final class PrayerTimes {
         }
     }
 
-    /** The index of the next prayer after {@code now} minutes, or -1 when Isyak has passed. */
     static int next(int[] minutes, int now) {
         for (int i = 0; i < minutes.length; i++) if (minutes[i] > now) return i;
         return -1;
     }
 
-    /** "dalam 12 min", "dalam 1 j 5 min", "dalam 2 j". */
     static String countdown(int minutesLeft) {
         int h = minutesLeft / 60, m = minutesLeft % 60;
         if (h == 0) return "dalam " + Math.max(1, m) + " min";
         return m == 0 ? "dalam " + h + " j" : "dalam " + h + " j " + m + " min";
     }
 
-    /** "05:49" in 24-hour time, "5:49" in 12-hour time (the clock beside it says AM or PM). */
     static String format(int minutes, boolean is24) {
         int h = minutes / 60, m = minutes % 60;
         if (is24) return String.format(Locale.ROOT, "%02d:%02d", h, m);
@@ -171,7 +182,7 @@ final class PrayerTimes {
     }
 
     private static JSONArray read(File f) {
-        if (f == null || !f.isFile() || f.length() > 512 * 1024) return null;
+        if (f == null || !f.isFile() || f.length() > 1024 * 1024) return null;
         try (InputStream in = new FileInputStream(f)) {
             byte[] buf = new byte[(int) f.length()];
             int n = 0, r;
