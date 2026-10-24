@@ -78,7 +78,7 @@ final class PrayerTimes {
             JSONArray days = new JSONArray();
             // Fetch 12 months from Aladhan API (Tangerang coordinates, Kemenag method)
             for (int month = 1; month <= 12; month++) {
-                String url = "http://api.aladhan.com/v1/calendar/" + year + "/" + month + "?latitude=-6.1783&longitude=106.6319&method=20";
+                String url = "https://api.aladhan.com/v1/calendar/" + year + "/" + month + "?latitude=-6.1783&longitude=106.6319&method=20";
                 byte[] body = get(url, 1024 * 1024);
                 JSONArray data = new JSONObject(new String(body, StandardCharsets.UTF_8)).optJSONArray("data");
                 if (data == null) continue;
